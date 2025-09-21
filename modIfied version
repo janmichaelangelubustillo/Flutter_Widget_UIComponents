@@ -1,0 +1,387 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+// Enum to define the different views of items
+enum ContentView { active, archived, deleted }
+
+void main() => runApp(const MyApp());
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider<ItemViewModel>(
+      create: (BuildContext context) => ItemViewModel(),
+      builder: (BuildContext context, Widget? child) {
+        return MaterialApp(
+          title: 'Item Management List',
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            primarySwatch: Colors.green,
+            appBarTheme: const AppBarTheme(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
+          ),
+          home: const MyHomePage(),
+        );
+      },
+    );
+  }
+}
+
+/// ViewModel to manage the state of active, archived, and deleted items.
+class ItemViewModel extends ChangeNotifier {
+  List<int> _activeItems = <int>[];
+  List<int> _archivedItems = <int>[];
+  List<int> _deletedItems = <int>[];
+
+  ContentView _currentView = ContentView.active;
+
+  ItemViewModel() {
+    // Initialize the active items list
+    _activeItems = List<int>.generate(20, (int index) => index + 1);
+  }
+
+  // Getters for the item lists
+  List<int> get activeItems => List<int>.unmodifiable(_activeItems);
+  List<int> get archivedItems => List<int>.unmodifiable(_archivedItems);
+  List<int> get deletedItems => List<int>.unmodifiable(_deletedItems);
+  ContentView get currentView => _currentView;
+
+  // Helper method to get the list of items corresponding to the current view
+  List<int> get currentDisplayList {
+    List<int> list;
+    switch (_currentView) {
+      case ContentView.active:
+        list = List<int>.from(_activeItems);
+        break;
+      case ContentView.archived:
+        list = List<int>.from(_archivedItems);
+        break;
+      case ContentView.deleted:
+        list = List<int>.from(_deletedItems);
+        break;
+    }
+    list.sort(); // Ensure lists are always sorted
+    return list;
+  }
+
+  // Sets the current view and notifies listeners
+  void setCurrentView(ContentView newView) {
+    if (_currentView != newView) {
+      _currentView = newView;
+      notifyListeners();
+    }
+  }
+
+  // Deletes an item from active list and moves it to deleted list
+  void deleteItem(int itemValue) {
+    if (_activeItems.remove(itemValue)) {
+      _deletedItems.add(itemValue);
+      notifyListeners();
+    }
+  }
+
+  // Archives an item from active list and moves it to archived list
+  void archiveItem(int itemValue) {
+    if (_activeItems.remove(itemValue)) {
+      _archivedItems.add(itemValue);
+      notifyListeners();
+    }
+  }
+
+  // Restores an item from archived or deleted list back to active list
+  void restoreItem(int itemValue) {
+    bool changed = false;
+    if (_archivedItems.remove(itemValue)) {
+      _activeItems.add(itemValue);
+      changed = true;
+    } else if (_deletedItems.remove(itemValue)) {
+      _activeItems.add(itemValue);
+      changed = true;
+    }
+    if (changed) {
+      _activeItems.sort(); // Keep active items sorted
+      notifyListeners();
+    }
+  }
+
+  // Permanently deletes an item from archived or deleted list
+  void permanentlyDeleteItem(int itemValue) {
+    bool changed = false;
+    if (_deletedItems.remove(itemValue)) {
+      changed = true;
+    } else if (_archivedItems.remove(itemValue)) {
+      changed = true;
+    }
+    if (changed) {
+      notifyListeners();
+    }
+  }
+
+  // Adds a new item to the active list (for demonstration/future use)
+  void addNewItem(int itemValue) {
+    _activeItems.add(itemValue);
+    _activeItems.sort();
+    notifyListeners();
+  }
+}
+
+class MyHomePage extends StatelessWidget {
+  const MyHomePage({super.key});
+
+  // Displays a SnackBar with the given message
+  void _showSnackBar(BuildContext context, String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  // Shows a modal bottom sheet to manage archived/deleted items
+  void _showRestoreManagementBottomSheet(BuildContext context) {
+    final ItemViewModel itemViewModel = context.read<ItemViewModel>();
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (BuildContext bottomSheetContext) {
+        return RestoreItemsBottomSheet(
+          archivedItems: itemViewModel.archivedItems,
+          deletedItems: itemViewModel.deletedItems,
+          onRestore: (int itemValue) {
+            itemViewModel.restoreItem(itemValue);
+            _showSnackBar(context, 'Item $itemValue restored from management.');
+            // Optionally close the bottom sheet after restoration, or refresh it
+            Navigator.pop(bottomSheetContext); // Close after restoring one item
+          },
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Watch for changes in ItemViewModel to rebuild the UI
+    final ItemViewModel itemViewModel = context.watch<ItemViewModel>();
+    final List<int> currentDisplayList = itemViewModel.currentDisplayList;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Item Management List'),
+        actions: <Widget>[
+          // Button to view and undo deleted and archived items
+          IconButton(
+            icon: const Icon(Icons.history),
+            tooltip: 'Manage Archived/Deleted Items',
+            onPressed: () => _showRestoreManagementBottomSheet(context),
+          ),
+          // Dropdown button to switch between active, archived, and deleted views
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0),
+            child: DropdownButton<ContentView>(
+              value: itemViewModel.currentView,
+              icon: const Icon(Icons.arrow_downward, color: Colors.white),
+              elevation: 16,
+              style: const TextStyle(color: Colors.white, fontSize: 16),
+              dropdownColor: Colors.green[700], // Darker background for dropdown items
+              underline: Container(
+                height: 2,
+                color: Colors.white,
+              ),
+              onChanged: (ContentView? newValue) {
+                if (newValue != null) {
+                  itemViewModel.setCurrentView(newValue);
+                }
+              },
+              items: <DropdownMenuItem<ContentView>>[
+                DropdownMenuItem<ContentView>(
+                  value: ContentView.active,
+                  child: Text('Active Items', style: TextStyle(color: Colors.white.withOpacity(0.9))),
+                ),
+                DropdownMenuItem<ContentView>(
+                  value: ContentView.archived,
+                  child: Text('Archived Items', style: TextStyle(color: Colors.white.withOpacity(0.9))),
+                ),
+                DropdownMenuItem<ContentView>(
+                  value: ContentView.deleted,
+                  child: Text('Deleted Items', style: TextStyle(color: Colors.white.withOpacity(0.9))),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      body: currentDisplayList.isEmpty
+          ? Center(
+              child: Text(
+                'No ${itemViewModel.currentView.name} items to display.',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+            )
+          : ListView.builder(
+              itemCount: currentDisplayList.length,
+              itemBuilder: (BuildContext context, int index) {
+                final int itemValue = currentDisplayList[index];
+
+                List<Widget> trailingActions = <Widget>[];
+
+                if (itemViewModel.currentView == ContentView.active) {
+                  // Actions for active items: Archive and Delete
+                  trailingActions.add(
+                    IconButton(
+                      icon: const Icon(Icons.archive),
+                      onPressed: () {
+                        itemViewModel.archiveItem(itemValue);
+                        _showSnackBar(context, 'Item $itemValue archived.');
+                      },
+                      tooltip: 'Archive',
+                    ),
+                  );
+                  trailingActions.add(
+                    IconButton(
+                      icon: const Icon(Icons.delete),
+                      onPressed: () {
+                        itemViewModel.deleteItem(itemValue);
+                        _showSnackBar(context, 'Item $itemValue deleted.');
+                      },
+                      tooltip: 'Delete',
+                    ),
+                  );
+                } else {
+                  // Actions for archived or deleted items: Restore and Permanently Delete
+                  trailingActions.add(
+                    IconButton(
+                      icon: const Icon(Icons.restore),
+                      onPressed: () {
+                        itemViewModel.restoreItem(itemValue);
+                        _showSnackBar(context, 'Item $itemValue restored.');
+                      },
+                      tooltip: 'Restore to active list',
+                    ),
+                  );
+                  trailingActions.add(
+                    IconButton(
+                      icon: const Icon(Icons.delete_forever),
+                      onPressed: () {
+                        itemViewModel.permanentlyDeleteItem(itemValue);
+                        _showSnackBar(context, 'Item $itemValue permanently deleted.');
+                      },
+                      tooltip: 'Permanently Delete',
+                    ),
+                  );
+                }
+
+                return ListTile(
+                  title: Text('Item $itemValue'),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min, // Ensure the row only takes necessary space
+                    children: trailingActions,
+                  ),
+                );
+              },
+            ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          ContentView nextView;
+          switch (itemViewModel.currentView) {
+            case ContentView.active:
+              nextView = ContentView.archived;
+              break;
+            case ContentView.archived:
+              nextView = ContentView.deleted;
+              break;
+            case ContentView.deleted:
+              nextView = ContentView.active; // Cycle back to active
+              break;
+          }
+          itemViewModel.setCurrentView(nextView);
+          _showSnackBar(context, 'Switched to ${nextView.name} items.');
+        },
+        child: const Icon(Icons.filter_alt),
+      ),
+    );
+  }
+}
+
+/// A data model to represent an item in the restore list.
+class _RestoreItem {
+  final int value;
+  final ContentView originalType; // To differentiate if it was archived or deleted
+
+  _RestoreItem(this.value, this.originalType);
+}
+
+/// A modal bottom sheet to display and manage archived and deleted items for restoration.
+class RestoreItemsBottomSheet extends StatelessWidget {
+  final List<int> archivedItems;
+  final List<int> deletedItems;
+  final void Function(int itemValue) onRestore;
+
+  const RestoreItemsBottomSheet({
+    super.key,
+    required this.archivedItems,
+    required this.deletedItems,
+    required this.onRestore,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final List<_RestoreItem> combinedItems = <_RestoreItem>[
+      ...archivedItems.map<_RestoreItem>((int item) => _RestoreItem(item, ContentView.archived)),
+      ...deletedItems.map<_RestoreItem>((int item) => _RestoreItem(item, ContentView.deleted)),
+    ];
+
+    combinedItems.sort((_RestoreItem a, _RestoreItem b) => a.value.compareTo(b.value));
+
+    return SizedBox(
+      height: MediaQuery.of(context).size.height * 0.75, // Occupy 75% of screen height
+      child: Column(
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Text(
+              'Manage Archived & Deleted Items',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+          ),
+          const Divider(),
+          if (combinedItems.isEmpty)
+            Expanded(
+              child: Center(
+                child: Text(
+                  'No items to restore.',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+            )
+          else
+            Expanded(
+              child: ListView.builder(
+                itemCount: combinedItems.length,
+                itemBuilder: (BuildContext context, int index) {
+                  final _RestoreItem item = combinedItems[index];
+                  final String typeLabel = item.originalType == ContentView.archived ? 'Archived' : 'Deleted';
+                  final IconData typeIcon =
+                      item.originalType == ContentView.archived ? Icons.archive : Icons.delete;
+
+                  return ListTile(
+                    leading: Icon(typeIcon),
+                    title: Text('Item ${item.value}'),
+                    subtitle: Text(typeLabel),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.restore, color: Colors.green),
+                      onPressed: () => onRestore(item.value),
+                      tooltip: 'Restore to active list',
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
